@@ -1,0 +1,13 @@
+# Ignorer Python virtuelle miljøer
+myenv39/
+
+# Ignorer cache-filer
+__pycache__/
+
+# Ignorer bygde filer for frontend
+dist/
+node_modules/
+
+# Andre vanlige ignoreringer
+.DS_Store
+*.log
