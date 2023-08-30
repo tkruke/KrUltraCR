@@ -110,7 +110,6 @@ def upload_runners_data_to_firebase(event_id):
                 person.first_name AS participant_first_name,
                 person.last_name AS participant_last_name,
                 participant.bib AS participant_bib,
-                rfid_tag.bib AS rfid_bib,
                 rfid_tag.uid AS rfid_uid
             FROM race
             JOIN participant ON race.id = participant.race_id
@@ -126,13 +125,12 @@ def upload_runners_data_to_firebase(event_id):
             # Create a list of dictionaries to hold the runner data
             runner_data = {}
             for row in rows:
-                rfid_uid = row[5]
+                rfid_uid = row[4]
                 runner_data[rfid_uid] = {
                     'race_name': row[0],
                     'participant_first_name': row[1],
                     'participant_last_name': row[2],
-                    'participant_bib': row[3],  # This should be the same as 'rfid_bib'
-                    'rfid_bib': row[4],
+                    'participant_bib': row[3], 
                 }
               
             # Upload to Firebase
@@ -152,28 +150,40 @@ def upload_event_data_to_firebase(selected_event_id, event_window):
     if mydb:
         mycursor = mydb.cursor()
         sql_query = """
-        SELECT rfid_reader.checkpoint_id, rfid_reader.chip_id, rfid_reader.description, event.id, rfid_reader.name 
+        SELECT rfid_reader.checkpoint_id, rfid_reader.chip_id, rfid_reader.description, 
+        event.id, rfid_reader.name, rfid_reader.status, checkpoint.name, checkpoint.description, checkpoint.minimum_split,
+        checkpoint.start_cp, checkpoint.finish_cp, checkpoint.repeat_cp
         FROM event 
         JOIN checkpoint ON event.id = checkpoint.event_id 
         JOIN rfid_reader ON checkpoint.id = rfid_reader.checkpoint_id 
         WHERE event.id = %s
         """
         mycursor.execute(sql_query, (selected_event_id,))
-        rfid_readers = mycursor.fetchall()
+        rfid_readers_db = mycursor.fetchall()
         
         # Step 2.2: Delete existing data in Firebase
         db.child("rfid_readers").remove(token=user_id_token)
         
         # Step 2.3: Upload new event data to Firebase
-        for reader in rfid_readers:
+        rfid_readers_list = []
+        for reader in rfid_readers_db:
             reader_data = {
                 "checkpoint_id": reader[0],
                 "chip_id": reader[1],
-                "description": reader[2],
+                "cru_description": reader[2],
                 "event_id": reader[3],
-                "name": reader[4]
+                "name": reader[4],
+                "status": reader[5],
+                "checkpoint": reader[6],
+                "cp_description": reader[7],
+                "minimum_split": reader[8],
+                "start": reader[9],
+                "finish": reader[10],
+                "repeat": reader[11],
             }
-            db.child("rfid_readers").push(reader_data, token=user_id_token)
+            rfid_readers_list.append(reader_data)
+
+        db.child("rfid_readers").set(rfid_readers_list, token=user_id_token)
 
         # Step 2.4: Upload runners data to Firebase
         upload_runners_data_to_firebase(selected_event_id)
