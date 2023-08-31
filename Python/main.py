@@ -1,3 +1,5 @@
+# Description: This file contains the main program for the KrUltra Database Manager.
+
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
