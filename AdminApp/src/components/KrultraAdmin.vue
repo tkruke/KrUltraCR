@@ -8,12 +8,13 @@
     
     <header>
       <img :src="LogoImage" alt="Logo" class="logo">
-      <h1 class="header-title">KrUltra admin</h1>
+      <h1 class="header-title">KrUltra ADMIN</h1>
       <div class="clock">{{ currentDateTime }}</div>
     </header>
 
     <div class="error-monitor">
-      # missing TS: {{ countCorrectedTimestamps() }}
+      # missing TS: {{ countCorrectedTimestamps() }} |
+      # invalid: {{ countInvalidRegistrations() }}
     </div>
 
     <div class="toolbar">
@@ -24,19 +25,19 @@
         <img v-else :src="require('@/assets/Play.png')" alt="Play">
       </button>
     
-      <button @click="toggleView" class="toolbar-button">
-        <img :src="buttonImage" alt="Bytt visning">
-      </button>
-
-      <label for="viewModeSelect">View:</label>
-      <select id="viewModeSelect" v-model="viewMode" @change="handleViewModeChange">
+      <label for="viewModeSelect" class="toolbar-label">View:</label>
+      <select id="viewModeSelect" class="toolbar-select" v-model="viewMode" @change="handleViewModeChange">
         <option value="auto">Automatic</option>
         <option value="detail">List</option>
         <option value="summary">Summary</option>
       </select>
+
+      <button @click="toggleView" class="toolbar-button">
+        <img :src="buttonImage" alt="Bytt visning">
+      </button>
      
-    
-      <select class="race-dropdown" v-if="showGrouped && sortedGroupedData && sortedGroupedData.length" v-model="selectedRace">
+      <label for="raceSelector" class="toolbar-label" v-if="showGrouped && sortedGroupedData && sortedGroupedData.length">Choose race:</label>
+      <select id="raceSelector" class="race-dropdown" v-if="showGrouped && sortedGroupedData && sortedGroupedData.length" v-model="selectedRace">
         <option v-for="race in uniqueRaces" :key="race">{{ race }}</option>
       </select>
     </div>
@@ -91,10 +92,11 @@
     <table v-else-if="!showGrouped && data && Object.keys(data).length">
       <thead>
         <tr>
-          <th></th>
-          <th>Startnr</th>
-          <th>Navn</th>
-          <th>Løp</th>
+          <th>#</th>
+          <th>Key</th>
+          <th>Bib</th>
+          <th>Name</th>
+          <th>Race</th>
           <th>CP</th>
           <th>Timestamp</th>
           <th>Tag uid</th>
@@ -103,13 +105,13 @@
       </thead>
       <tbody>
 
-        <tr v-for="(registration, index) in sortedData" :key="index" :class="{ 
-            // 'highest-timestamp': registration.timestamp - registration.reg_delay_ms === highestTimestampRow, 
-            // 'highlight': shouldHighlight(registration.timestamp - registration.reg_delay_ms),
+        <!-- <tr v-for="(registration, index) in sortedData" :key="index" :class="{  -->
+        <tr v-for="(registration, index) in sortedData" :key="registration.key" :class="{ 
             'highlight-error': registration.status === 'missing timestamp auto-corrected',
             'invalid-row': registration.status === 'invalid',
           }" >
           <td>{{ sortedData.length - index }}</td>
+          <td>{{ registration.key }}</td>
           <td>{{ getRunnerBib(registration.rfid_tag_uid) }}</td>
           <td>{{ getRunnerName(registration.rfid_tag_uid) }}</td>
           <td>{{ getRunnerRace(registration.rfid_tag_uid) }}</td>
@@ -163,7 +165,7 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
       error: null,
       runners: null,
       rfidReaders: null,
-      selectedRace: 'Alle',
+      selectedRace: 'All',
       currentDateTime: '',
       autoDelay: 5000,          // 5 seconds delay before switching to summary view
       highlightPeriod: 300000, // 60000 per minute, 300000 per 5 minutes
@@ -190,16 +192,6 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
       }
     },
 
-    // uniqueCheckpoints() {
-    //   const checkpoints = new Set();
-    //   if (this.rfidReaders) {
-    //     Object.values(this.rfidReaders).forEach(reader => {
-    //       checkpoints.add(reader.checkpoint);
-    //     });
-    //   }
-    //   console.log(Array.from(checkpoints));
-    //   return Array.from(checkpoints);
-    // },
     uniqueCheckpoints() {
       const checkpoints = [];
       if (this.rfidReaders) {
@@ -210,7 +202,7 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
           });
       }
       const sortedCheckpoints = checkpoints.sort((a, b) => a.id - b.id).map(cp => cp.name);
-      console.log(sortedCheckpoints);
+      this.logToFirebase(`sortedCheckpoints: ${JSON.stringify(sortedCheckpoints)}`);
       return sortedCheckpoints;
     },
 
@@ -227,14 +219,13 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
       const result = {};
       if (this.data && this.rfidReaders) {
         Object.values(this.data).forEach(registration => {
-          // console.log("Registration:", registration); // for debugging
           const rfid = registration.rfid_tag_uid;
           const reader = this.rfidReaders[registration.rfid_reader_id];
           const checkpoint = reader ? reader.checkpoint : "Ukjent";
           const bib = this.getRunnerBib(rfid);
           const race = this.getRunnerRace(rfid);
 
-          if ((this.selectedRace !== 'Alle' && race !== this.selectedRace) || registration.status === 'invalid') {
+          if ((this.selectedRace !== 'All' && race !== this.selectedRace) || registration.status === 'invalid') {
             return;
           }
 
@@ -251,15 +242,11 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
           result[bib].count += 1;
           result[bib].checkpoints[checkpoint] = (result[bib].checkpoints[checkpoint] || 0) + 1;
 
-          // console.log("Current registration timestamp and reg_delay_ms:", registration.timestamp, registration.reg_delay_ms);
-          // console.log("Current result timestamp and reg_delay_ms:", result[bib].timestamp, result[bib].reg_delay_ms);
 
           // Oppdater timestamp og reg_delay_ms
           if (registration.timestamp - registration.reg_delay_ms > result[bib].timestamp - result[bib].reg_delay_ms) {
-            // console.log("Updating timestamp and reg_delay_ms for bib:", bib);
             result[bib].timestamp = registration.timestamp;
             result[bib].reg_delay_ms = registration.reg_delay_ms;
-            // console.log(registration.timestamp, registration.reg_delay_ms);
           }
 
           if (rfid && !result[bib].rfids.includes(rfid)) {
@@ -291,18 +278,23 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
       return sortedArray.map(([bib, data]) => ({ bib, ...data }));
     },
 
-    // funksjon for å returnere "Alle" + alle unike race_name fra runners
+    // funksjon for å returnere "All" + alle unike race_name fra runners
     uniqueRaces() {
       const races = new Set();
       Object.values(this.runners).forEach(runner => {
         races.add(runner.race_name);
       });
-      return ["Alle", ...Array.from(races)];
+      return ["All", ...Array.from(races)];
     },
 
     // funksjon for å returnere sortert data. Kan utvides til å ta hensyn til brukervalg for sorteringsrekkefølge.
+    // sortedData() {
+    //   return Object.values(this.data).sort((a, b) => b.timestamp - a.timestamp);
+    // },
     sortedData() {
-      return Object.values(this.data).sort((a, b) => b.timestamp - a.timestamp);
+      return Object.entries(this.data)
+        .sort(([, a], [, b]) => b.timestamp - a.timestamp)
+        .map(([key, registration]) => ({ key, ...registration }));
     },
 
     currentTime() {
@@ -325,8 +317,6 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
     },
 
     shouldHighlightSumRow(checkpoints) {
-      console.log("checkpoints:", checkpoints);
-      // const checkpointValues = Object.values(checkpoints);
       const checkpointValues = this.uniqueCheckpoints.map(cp => checkpoints[cp] || 0);
       let dropCount = 0; // Teller for antall ganger det er et "dropp" på 1 registrering
 
@@ -336,14 +326,11 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
         if (diff === 1) {
           dropCount++;
         } else if (diff !== 0) {
-          console.log("diff:", diff);
-          console.log("checkpointValues[i]:", checkpointValues[i]);
           return true; // Marker raden hvis forskjellen er noe annet enn 0 eller 1
         }
       }
 
       // Marker raden hvis det er mer enn ett "dropp" på 1 registrering
-      console.log("dropCount > 1:", dropCount > 1);
       return dropCount > 1;
     },
 
@@ -381,7 +368,7 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
           this.stopListening();
         }
         this.isUpdating = false;
-        console.log("Updates paused");
+        this.logToFirebase("Updates paused");
       } else {
         const registrationsRef = dbRef(db, "registrations");
         this.stopListening = onValue(registrationsRef, snapshot => {
@@ -389,14 +376,13 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
           this.loading = false;
         });
         this.isUpdating = true;
-        console.log("Updates resumed");
+        this.logToFirebase("Updates resumed");
       }
     },
 
     formatDate(timestamp, reg_delay_ms = 0) {
       const adjustedTimestamp = timestamp - reg_delay_ms;
       const date = new Date(adjustedTimestamp);
-      // console.log("adjustedTimestamp i formatDate:", adjustedTimestamp);
       return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
     },
 
@@ -443,8 +429,6 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
       const runnersRef = dbRef(db, "runners");
       const snapshot = await get(runnersRef);
       this.runners = snapshot.val();
-      // console.log(this.runners);
-      // console.log(JSON.stringify(this.runners));
     },
 
     getRunnerName(rfid_tag_uid) {
@@ -479,26 +463,41 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
         process.env.VUE_APP_FIREBASE_EMAIL,
         process.env.VUE_APP_FIREBASE_PASSWORD
       );
-      console.log("Logged in successfully");
+      this.logToFirebase("Logged in successfully");
     } catch (error) {
-      console.error("Error logging in:", error.message);
+      this.logToFirebase("Error logging in: " + error.message, "error");
     }
     },
 
-    logToFirebase(message) {
+    logToFirebase(message, type="log") {
       const uniqueKey = Date.now().toString(); // Bruker nåværende tidsstempel som en unik nøkkel
       const logRef = dbRef(db, 'logs/' + uniqueKey);
       set(logRef, {
         timestamp: Date.now(),
+        type: type,
         message: message
       });
+      if (type === "error") {
+        console.error(message);
+      } else if (type === "warning") {
+        console.warn(message);
+      } else if (type === "info") {
+        console.info(message);
+      } else if (type === "debug") {
+        console.debug(message);
+      } else {
+        console.log(message);
+      }
     },
 
     countCorrectedTimestamps() {
       if (!this.data) return 0;  // Returner 0 hvis data er undefined eller null
-      const countCorrectedTimestamps = Object.values(this.data).filter(registration => registration.status === 'missing timestamp auto-corrected').length;
-      console.log("countCorrectedTimestamps:", countCorrectedTimestamps);
       return Object.values(this.data).filter(registration => registration.status === 'missing timestamp auto-corrected').length;
+    },
+
+    countInvalidRegistrations() {
+      if (!this.data) return 0;  // Returner 0 hvis data er undefined eller null
+      return Object.values(this.data).filter(registration => registration.status === 'invalid').length;
     }
 
   },  // methods
@@ -506,7 +505,6 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
 
   // Lifecycle hooks - Som mounted(), created(), etc., for å kjøre kode på bestemte tidspunkter i komponentens livssyklus.
   async mounted() {   // mounted() kjøres når komponenten er ferdig montert i DOMen.
-    console.log(process.env.VUE_APP_TOOLTIP_TEXT);
     try {
       // await signInAnonymously(auth);
       this.loginToFirebase();
@@ -514,14 +512,12 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
       await this.fetchRfidReaders();  // for å hente "rfid_readers" data
 
       this.updateDateTime();
-      // setInterval(this.updateDateTime, 10000);
+      setInterval(this.updateDateTime, 1000);
 
       const registrationsRef = dbRef(db, "registrations");
       this.stopListening = onValue(registrationsRef, snapshot => {
         this.data = snapshot.val();
-        // this.updateDateTime();
         if (this.data) {
-        console.log("Registrations:", this.data);
         Object.entries(this.data).forEach(async ([key, registration]) => {
           if (!registration.timestamp) {
             const registrationRef = dbRef(db, "registrations/" + key);
@@ -552,22 +548,9 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
                 }, 3000);
 
               } catch (error) {
-                console.error("Error updating registration status:", error);
+                this.logToFirebase("Error updating registration status:" + error, "error");
               }
-            // } else if (registration.status === 'registered' && Date.now() - registration.discoveredAt > 10000) {
-            //   // Dette er en eldre registrering som mangler en timestamp, og det har gått mer enn 10 sekunder siden den ble oppdaget
-            //   registration.timestamp = Date.now() - 1000;
-            //   console.log("Adding timestamp to registration:", registration);
-            //   try {
-            //     await update(registrationRef, {
-            //       timestamp: registration.timestamp,
-            //       status: 'missing timestamp auto-corrected'
-            //     });
-            //   } catch (error) {
-            //     console.error("Error updating registration:", error);
-            //   }
             } else {
-              console.log("registration.discoveredAt:", registration.discoveredAt);
               if (registration.discoveredAt) {
                 registration.timestamp = registration.discoveredAt; // Sett timestamp lokalt for visning i tabellen
               } else {
@@ -589,14 +572,14 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
         this.loading = false;
       });
     } catch (error) {
-      console.error("Error signing in:", error);
+      this.logToFirebase("Error signing in:" + error, "error");
       this.loading = false;
     }
   },
 
 
   beforeUnmount() {   // beforeUnmount() kjøres før komponenten blir avmontert fra DOMen.
-    console.log("beforeUnmount is being executed!");
+    this.logToFirebase("beforeUnmount is being executed!");
     if (this.stopListening !== null) {
       this.stopListening();
     }
@@ -791,6 +774,19 @@ header {
   visibility: visible;
 }
 
+.toolbar-label {
+  font-weight: bold;
+  margin-right: 10px;
+  color: white;
+}
+
+.toolbar-select {
+  padding: 5px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  margin-right: 10px;
+}
 
 </style>
   
