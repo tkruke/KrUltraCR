@@ -137,7 +137,6 @@
 
 // import
 import { auth, db, signInWithEmail } from "@/firebaseInit.js";
-// import { signInAnonymously } from "firebase/auth";
 import { onValue, ref as dbRef } from "firebase/database";
 import { get, set, update } from "firebase/database";
 import ListImage from '@/assets/List.png';
@@ -168,7 +167,6 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
       selectedRace: 'All',
       currentDateTime: '',
       autoDelay: 5000,          // 5 seconds delay before switching to summary view
-      highlightPeriod: 300000, // 60000 per minute, 300000 per 5 minutes
       InfoImage: InfoImage,
       showTooltip: false,
       tooltipText: process.env.VUE_APP_TOOLTIP_TEXT.replace(/\\n/g, '<br>'),
@@ -178,9 +176,6 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
 
   // Computed
   computed: {   // Computed properties er funksjoner som returnerer data som kan brukes i komponenten.
-    highestTimestampRow() {
-      return Math.max(...this.sortedGroupedData.map(row => row.timestamp - row.reg_delay_ms));
-    },
 
     buttonImage() {
       if (this.viewMode === 'auto') {
@@ -288,9 +283,6 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
     },
 
     // funksjon for å returnere sortert data. Kan utvides til å ta hensyn til brukervalg for sorteringsrekkefølge.
-    // sortedData() {
-    //   return Object.values(this.data).sort((a, b) => b.timestamp - a.timestamp);
-    // },
     sortedData() {
       return Object.entries(this.data)
         .sort(([, a], [, b]) => b.timestamp - a.timestamp)
@@ -311,10 +303,6 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
       return value;
     },
 
-    shouldHighlight(adjustedTimestamp) {
-      const currentTime = Date.now(); // Nåværende tid i millisekunder
-      return currentTime - adjustedTimestamp <= this.highlightPeriod; // Endret innenfor de siste x sekundene, hvor x er angitt av this.highlightPeriod
-    },
 
     shouldHighlightSumRow(checkpoints) {
       const checkpointValues = this.uniqueCheckpoints.map(cp => checkpoints[cp] || 0);
@@ -330,8 +318,8 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
         }
       }
 
-      // Marker raden hvis det er mer enn ett "dropp" på 1 registrering
-      return dropCount > 1;
+      // Marker raden hvis det er mer enn ett "dropp"
+      return dropCount > 1; // returnerer true hvis det er mer enn ett "dropp"
     },
 
     updateDateTime() {
@@ -498,7 +486,49 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
     countInvalidRegistrations() {
       if (!this.data) return 0;  // Returner 0 hvis data er undefined eller null
       return Object.values(this.data).filter(registration => registration.status === 'invalid').length;
-    }
+    },
+
+    async handleRegistration(key, registration) {
+      if (!registration.timestamp) {
+        const registrationRef = dbRef(db, "registrations/" + key);
+        if (!registration.status) {
+          // Dette er en ny registrering, sett status til 'registered'
+          registration.discoveredAt = Date.now(); // Legg til en lokal discoveredAt timestamp
+          try {
+            await update(registrationRef, { 
+              status: 'registered',
+              discoveredAt: Date.now()
+            });
+
+            // Sett en timeout for å sjekke etter 3 sekunder om timestamp er på plass
+            setTimeout(async () => {
+              const snapshot = await get(registrationRef);
+              const updatedRegistration = snapshot.val();
+              if (updatedRegistration.status === 'registered' && !updatedRegistration.timestamp) {
+                // Oppdater timestamp og status
+                await update(registrationRef, {
+                  timestamp: Date.now() - 1000,
+                  status: 'missing timestamp auto-corrected'
+                });
+              } else if (updatedRegistration.status === 'registered'){
+                await update(registrationRef, {
+                  status: 'OK'
+                });
+              }
+            }, 3000);
+
+          } catch (error) {
+            this.logToFirebase("Error updating registration status:" + error, "error");
+          }
+        } else {
+          if (registration.discoveredAt) {
+            registration.timestamp = registration.discoveredAt; // Sett timestamp lokalt for visning i tabellen
+          } else {
+            registration.timestamp = 1000; 
+          }
+        }
+      }
+    },
 
   },  // methods
 
@@ -518,47 +548,50 @@ export default {    // Eksporterer komponenten slik at den kan brukes i andre fi
       this.stopListening = onValue(registrationsRef, snapshot => {
         this.data = snapshot.val();
         if (this.data) {
-        Object.entries(this.data).forEach(async ([key, registration]) => {
-          if (!registration.timestamp) {
-            const registrationRef = dbRef(db, "registrations/" + key);
-            if (!registration.status) {
-              // Dette er en ny registrering, sett status til 'registered'
-              registration.discoveredAt = Date.now(); // Legg til en lokal discoveredAt timestamp
-              try {
-                await update(registrationRef, { 
-                  status: 'registered',
-                  discoveredAt: Date.now()
-                });
-
-                // Sett en timeout for å sjekke etter 10 sekunder om timestamp er på plass
-                setTimeout(async () => {
-                  const snapshot = await get(registrationRef);
-                  const updatedRegistration = snapshot.val();
-                  if (updatedRegistration.status === 'registered' && !updatedRegistration.timestamp) {
-                    // Oppdater timestamp og status
-                    await update(registrationRef, {
-                      timestamp: Date.now() - 1000,
-                      status: 'missing timestamp auto-corrected'
-                    });
-                  } else if (updatedRegistration.status === 'registered'){
-                    await update(registrationRef, {
-                      status: 'OK'
-                    });
-                  }
-                }, 3000);
-
-              } catch (error) {
-                this.logToFirebase("Error updating registration status:" + error, "error");
-              }
-            } else {
-              if (registration.discoveredAt) {
-                registration.timestamp = registration.discoveredAt; // Sett timestamp lokalt for visning i tabellen
-              } else {
-                registration.timestamp = 1000; 
-              }
-            }
-          }
+        Object.entries(this.data).forEach(([key, registration]) => {
+          this.handleRegistration(key, registration);
         });
+        // Object.entries(this.data).forEach(async ([key, registration]) => {
+        //   if (!registration.timestamp) {
+        //     const registrationRef = dbRef(db, "registrations/" + key);
+        //     if (!registration.status) {
+        //       // Dette er en ny registrering, sett status til 'registered'
+        //       registration.discoveredAt = Date.now(); // Legg til en lokal discoveredAt timestamp
+        //       try {
+        //         await update(registrationRef, { 
+        //           status: 'registered',
+        //           discoveredAt: Date.now()
+        //         });
+
+        //         // Sett en timeout for å sjekke etter 10 sekunder om timestamp er på plass
+        //         setTimeout(async () => {
+        //           const snapshot = await get(registrationRef);
+        //           const updatedRegistration = snapshot.val();
+        //           if (updatedRegistration.status === 'registered' && !updatedRegistration.timestamp) {
+        //             // Oppdater timestamp og status
+        //             await update(registrationRef, {
+        //               timestamp: Date.now() - 1000,
+        //               status: 'missing timestamp auto-corrected'
+        //             });
+        //           } else if (updatedRegistration.status === 'registered'){
+        //             await update(registrationRef, {
+        //               status: 'OK'
+        //             });
+        //           }
+        //         }, 3000);
+
+        //       } catch (error) {
+        //         this.logToFirebase("Error updating registration status:" + error, "error");
+        //       }
+        //     } else {
+        //       if (registration.discoveredAt) {
+        //         registration.timestamp = registration.discoveredAt; // Sett timestamp lokalt for visning i tabellen
+        //       } else {
+        //         registration.timestamp = 1000; 
+        //       }
+        //     }
+        //   }
+        // });
 
         }
         if (this.data === null) {
@@ -711,13 +744,13 @@ header {
   cursor: pointer;
 }
 
-.highlight {
-  background-color: #e9f2f8; /* lys blå farge */
-}
+/* .highlight {
+  background-color: #e9f2f8; 
+} */
 
-.highest-timestamp {
-  background-color: #fcebb6 !important;   /* lys gul farge */
-}
+/* .highest-timestamp {
+  background-color: #fcebb6 !important;  
+} */
 
 .highlight-error {
   background-color: #FFD6D6; /* lys rød farge */
