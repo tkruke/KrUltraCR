@@ -6,6 +6,20 @@ from tkinter import messagebox
 import mysql.connector
 from firebase import firebase
 import pyrebase
+from decouple import config
+
+# Henter konfigurasjonsvariabler fra .env-filen
+FIREBASE_API_KEY = config('FIREBASE_API_KEY')
+FIREBASE_AUTH_DOMAIN = config('FIREBASE_AUTH_DOMAIN')
+FIREBASE_DATABASE_URL = config('FIREBASE_DATABASE_URL')
+FIREBASE_STORAGE_BUCKET = config('FIREBASE_STORAGE_BUCKET')
+FIREBASE_EMAIL = config('FIREBASE_EMAIL')
+FIREBASE_PASSWORD = config('FIREBASE_PASSWORD')
+MARIADB_HOST = config('MARIADB_HOST')
+MARIADB_PORT = config('MARIADB_PORT')
+MARIADB_USER = config('MARIADB_USER')
+MARIADB_PASSWORD = config('MARIADB_PASSWORD')
+MARIADB_DATABASE = config('MARIADB_DATABASE')
 
 
 # Initialize Tkinter GUI
@@ -13,11 +27,12 @@ root = tk.Tk()
 root.title("KrUltra Database Manager")
 
 # Firebase-prosjektets konfigurasjon
+
 config = {
-    "apiKey": "AIzaSyApppISgdtYgJbqg9iEhFzT8X1TIh2OHFo",
-    "authDomain": "krultracr.firebaseapp.com",
-    "databaseURL": "https://krultracr-default-rtdb.europe-west1.firebasedatabase.app",
-    "storageBucket": "krultracr.appspot.com",
+    "apiKey": FIREBASE_API_KEY,
+    "authDomain": FIREBASE_AUTH_DOMAIN,
+    "databaseURL": FIREBASE_DATABASE_URL,
+    "storageBucket": FIREBASE_STORAGE_BUCKET,
 }
 
 # Initialiser Firebase
@@ -25,23 +40,23 @@ firebase = pyrebase.initialize_app(config)
 
 # Autentisering
 auth = firebase.auth()
-email = "torgeir.kruke@krultra.no"
-password = "CKO)7Zhl2#gQZ7^ssqT{"
+email = FIREBASE_EMAIL
+password = FIREBASE_PASSWORD
 user = auth.sign_in_with_email_and_password(email, password)
 user_id_token = user['idToken']
 
-# Initialiser database-objektet
+# Initialiser database-objektene for Firebase
 db = firebase.database()
 
 # Function to connect to MariaDB
 def connect_to_mariadb():
     try:
         mydb = mysql.connector.connect(
-            host="krultrano02.mysql.domeneshop.no",
-            port="3306",
-            user="krultrano02",
-            password="0seinking-himla-Audiolog-fjartan",
-            database="krultrano02"
+            host=MARIADB_HOST,
+            port=MARIADB_PORT,
+            user=MARIADB_USER,
+            password=MARIADB_PASSWORD,
+            database=MARIADB_DATABASE
         )
         print("Connected to MariaDB")
         return mydb
@@ -51,6 +66,9 @@ def connect_to_mariadb():
 
 # Function to handle "Exit"
 def exit_app():
+    global mydb
+    if mydb:
+        mydb.close()
     root.destroy()
 
 # Function to handle "Upload New event Data"
@@ -61,7 +79,7 @@ def upload_new_event_data():
 
 # Function to fetch and display active events
 def fetch_and_display_active_events():
-    mydb = connect_to_mariadb()
+    # mydb = connect_to_mariadb()   # erstattet av global variabel
     if mydb:
         mycursor = mydb.cursor()
         sql_query = "SELECT id, long_name, year, edition FROM event WHERE status=1"
@@ -73,6 +91,8 @@ def fetch_and_display_active_events():
             display_event_selection(active_events)
         else:
             messagebox.showinfo("Ingen aktive løp", "Det finnes ingen aktive løp i databasen.")
+    else:
+        messagebox.showerror("Feil", "Klarte ikke å koble til MariaDB.")
 
 
 # Function to display active events for user selection
@@ -103,7 +123,7 @@ def display_event_selection(active_events):
 # Function to upload runners data to Firebase
 def upload_runners_data_to_firebase(event_id):
     try:
-        mydb = connect_to_mariadb()
+        # mydb = connect_to_mariadb()   # erstattet av global variabel
         if mydb:
             mycursor = mydb.cursor()
             query = """
@@ -148,7 +168,7 @@ def upload_runners_data_to_firebase(event_id):
 # Function to upload event data to Firebase
 def upload_event_data_to_firebase(selected_event_id, event_window):
     # Step 2.1: Fetch data from MariaDB
-    mydb = connect_to_mariadb()
+    # mydb = connect_to_mariadb()   # erstattet av global variabel
     if mydb:
         mycursor = mydb.cursor()
         sql_query = """
@@ -204,14 +224,113 @@ def upload_event_data_to_firebase(selected_event_id, event_window):
                 messagebox.showerror("Feil", f"Klarte ikke å slette registreringer: {e}")
     else:
         messagebox.showerror("Feil", "Klarte ikke å koble til MariaDB.")
+
+
+# Create the labels for the tables
+events_label = tk.Label(root, text="Events", font=("Arial", 12, "bold"))
+races_label = tk.Label(root, text="Races", font=("Arial", 12, "bold"))
+
+# Place the labels above their respective frames
+events_label.grid(row=0, column=1, pady=(10,0))
+races_label.grid(row=0, column=2, pady=(10,0))
+
+# Create the frames for the tables
+frame_events = tk.Frame(root)
+frame_events.grid(row=1, column=1, padx=5, pady=5, sticky="nsew")
+frame_races = tk.Frame(root)
+frame_races.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
+
+
+def fetch_data_from_database():
+    print("Fetching data from database...")
+    # mydb = connect_to_mariadb()   # erstattet av global variabel
+    if mydb:
+        mycursor = mydb.cursor()
+
+        # For Events
+        mycursor.execute("SELECT id, long_name, year, edition FROM event WHERE status=1")
+        events = mycursor.fetchall()
+        events_tree["columns"] = ("id", "long_name", "year", "edition")
+        events_tree["displaycolumns"] = ("id", "long_name", "year")
+        events_tree["show"] = "headings"  # Removes the first empty column
+        # Configuring the columns
+        events_tree.column("id", width=50)
+        events_tree.column("long_name", width=100)
+        events_tree.column("year", width=50)
+        for col in events_tree["columns"]:
+            events_tree.heading(col, text=col)
+        # Adding rows to the Treeview
+        for event in events:
+            events_tree.insert("", "end", values=event)
+        # Packing the Treeview
+        events_tree.pack(in_=frame_events, side="left", fill="both", expand=True)
+
+        # For Races
+        mycursor.execute("SELECT id, name FROM race WHERE status=1")
+        races = mycursor.fetchall()
+        races_tree["columns"] = ("id", "name")
+        races_tree["displaycolumns"] = ("id", "name")
+        races_tree["show"] = "headings"  # Removes the first empty column
+        # Configuring the columns
+        races_tree.column("id", width=50)
+        races_tree.column("name", width=100)
+        for col in races_tree["columns"]:
+            races_tree.heading(col, text=col)
+        # Adding rows to the Treeview
+        for race in races:
+            races_tree.insert("", "end", values=race)
+        # Packing the Treeview
+        races_tree.pack(in_=frame_races, side="left", fill="both", expand=True)
+
+def on_event_selected(event):
+    if mydb:
+        # Hent valgte rader
+        selected_items = events_tree.selection()
+        
+        # Hent event_id fra de valgte radene
+        selected_event_ids = [events_tree.item(item)['values'][0] for item in selected_items]
+
+        # Hent rader fra Races basert på valgte event_id(s)
+        mycursor = mydb.cursor()
+        query = "SELECT id, name FROM race WHERE status=1 AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
+        mycursor.execute(query, tuple(selected_event_ids))
+        races = mycursor.fetchall()
+
+        # Tøm Races-tabellen
+        for race in races_tree.get_children():
+            races_tree.delete(race)
+
+        # Fyll Races-tabellen med de filtrerte resultatene
+        for race in races:
+            races_tree.insert("", "end", values=race)
+    else:
+        messagebox.showerror("Feil", "Klarte ikke å koble til MariaDB.")    
         
 # Create buttons for the main menu
 upload_button = ttk.Button(root, text="Last opp data for nytt løp", command=upload_new_event_data)
 exit_button = ttk.Button(root, text="Avslutt", command=exit_app)
 
 # Place the buttons on the window
-upload_button.grid(row=0, column=0, padx=10, pady=10)
-exit_button.grid(row=1, column=0, padx=10, pady=10)
+upload_button.grid(row=1, column=0, padx=10, pady=10)
+exit_button.grid(row=2, column=0, padx=10, pady=10)
 
+# Opprett Treeview-widget for hver tabell
+events_tree = ttk.Treeview(root)
+events_tree.bind("<<TreeviewSelect>>", on_event_selected)   # Bind hendelsen for radvalg i Events-tabellen
+races_tree = ttk.Treeview(root)
+# checkpoints_tree = ttk.Treeview(root)
+# units_tree = ttk.Treeview(root)
+# participants_tree = ttk.Treeview(root)
+# registrations_tree = ttk.Treeview(root)
+
+# Opprett filter-widget for hver tabell
+events_filter = ttk.Combobox(root)
+# checkpoints_filter = ttk.Combobox(root)
+# units_filter = ttk.Combobox(root)
+# participants_filter = ttk.Combobox(root)
+
+
+mydb = connect_to_mariadb()
+fetch_data_from_database()
 
 root.mainloop()

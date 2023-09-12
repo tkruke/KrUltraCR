@@ -1,4 +1,5 @@
 # Ignorer Python virtuelle miljøer
+myenv/
 myenv39/
 
 # Ignorer cache-filer
