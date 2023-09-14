@@ -71,54 +71,6 @@ def exit_app():
         mydb.close()
     root.destroy()
 
-# Function to handle "Upload New event Data"
-def upload_new_event_data():
-    response = messagebox.askyesno("Advarsel", "NB: ALLE EKSISTERENDE DATA SLETTES! Vil du fortsette?")
-    if response:
-        fetch_and_display_active_events()
-
-# Function to fetch and display active events
-def fetch_and_display_active_events():
-    # mydb = connect_to_mariadb()   # erstattet av global variabel
-    if mydb:
-        mycursor = mydb.cursor()
-        sql_query = "SELECT id, long_name, year, edition FROM event WHERE status=1"
-        mycursor.execute(sql_query)
-        active_events = mycursor.fetchall()
-
-        if active_events:
-            # Display events for the user to select, we will implement this function next
-            display_event_selection(active_events)
-        else:
-            messagebox.showinfo("Ingen aktive løp", "Det finnes ingen aktive løp i databasen.")
-    else:
-        messagebox.showerror("Feil", "Klarte ikke å koble til MariaDB.")
-
-
-# Function to display active events for user selection
-def display_event_selection(active_events):
-    event_window = tk.Toplevel(root)
-    event_window.title("Velg et aktivt løp")
-    
-    tk.Label(event_window, text="Velg et løp fra listen:").pack()
-    
-    event_var = tk.StringVar()
-    event_var.set("Velg et løp")
-    
-    event_menu = ttk.Combobox(event_window, textvariable=event_var, values=[event[1] for event in active_events])
-    event_menu.pack()
-    
-    def select_event():
-        selected_event = event_var.get()
-        if selected_event != "Velg et løp":
-            selected_event_id = next((event[0] for event in active_events if event[1] == selected_event), None)
-            if selected_event_id is not None:
-                # Proceed to Step 2 to upload data to Firebase
-                upload_event_data_to_firebase(selected_event_id, event_window)
-            event_window.destroy()
-
-    tk.Button(event_window, text="Velg", command=select_event).pack()
-
 
 # Function to upload runners data to Firebase
 def upload_runners_data_to_firebase(event_id):
@@ -162,11 +114,12 @@ def upload_runners_data_to_firebase(event_id):
             
     except Exception as e:
         print(f"Failed to upload runners data to Firebase: {e}")
+        messagebox.showerror("Error", f"Failed to upload runners data to Firebase: {e}")
         return None
 
 
 # Function to upload event data to Firebase
-def upload_event_data_to_firebase(selected_event_id, event_window):
+def upload_event_data_to_firebase(selected_event_id):
     # Step 2.1: Fetch data from MariaDB
     # mydb = connect_to_mariadb()   # erstattet av global variabel
     if mydb:
@@ -192,7 +145,7 @@ def upload_event_data_to_firebase(selected_event_id, event_window):
             reader_data = {
                 "checkpoint_id": reader[0],
                 "chip_id": reader[1],
-                "cru_description": reader[2],
+                "crus_description": reader[2],
                 "event_id": reader[3],
                 "name": reader[4],
                 "status": reader[5],
@@ -210,20 +163,35 @@ def upload_event_data_to_firebase(selected_event_id, event_window):
         # Step 2.4: Upload runners data to Firebase
         upload_runners_data_to_firebase(selected_event_id)
         
-        print("Successfully uploaded data to Firebase")
-        messagebox.showinfo("Suksess", "Dataene ble lastet opp til Firebase.")
-        event_window.destroy()
+        print("Successfully uploaded event data to Firebase")
+        messagebox.showinfo("Success", "Event data uploaded to Firebase.")
+        # event_window.destroy()
 
-        # Spør brukeren om å slette eksisterende registreringer
-        delete_registrations = messagebox.askyesno("Slett registreringer", "Ønsker du også å slette alle tidligere registreringer?")
-        if delete_registrations:
-            try:
-                db.child("registrations").remove(token=user_id_token)  # Slett alle data under "registrations"
-                messagebox.showinfo("Suksess", "Alle registreringer ble fjernet.")
-            except Exception as e:
-                messagebox.showerror("Feil", f"Klarte ikke å slette registreringer: {e}")
+        # # Spør brukeren om å slette eksisterende registreringer
+        # delete_registrations = messagebox.askyesno("Slett registreringer", "Ønsker du også å slette alle tidligere registreringer?")
+        # if delete_registrations:
+        #     try:
+        #         db.child("registrations").remove(token=user_id_token)  # Slett alle data under "registrations"
+        #         messagebox.showinfo("Suksess", "Alle registreringer ble fjernet.")
+        #     except Exception as e:
+        #         messagebox.showerror("Feil", f"Klarte ikke å slette registreringer: {e}")
     else:
-        messagebox.showerror("Feil", "Klarte ikke å koble til MariaDB.")
+        messagebox.showerror("Error", "Unable to connect to database (MariaDB).")
+
+
+def upload_selected_event_to_firebase():
+    selected_items = events_tree.selection()
+
+    if len(selected_items) != 1:
+        messagebox.showwarning("Valg av event", "Vennligst velg ett event for opplasting.")
+        return
+
+    selected_event_id = events_tree.item(selected_items[0])['values'][0]
+
+    answer = messagebox.askyesno("Bekreftelse", "Er du sikker? Eksisterende data fjernes!")
+    if answer:
+        upload_event_data_to_firebase(selected_event_id)  # Kall eksisterende funksjon med valgt event ID
+
 
 # Create a frame for each table
 def fetch_data_from_database():
@@ -242,168 +210,451 @@ def fetch_data_from_database():
         events_tree.grid(row=0, column=0, sticky="nsew", in_=frame_events)
 
         # For Races
-        mycursor.execute("SELECT id, name FROM race WHERE status=1")
-        races = mycursor.fetchall()
-        # Adding rows to the Treeview
-        for race in races:
-            races_tree.insert("", "end", values=race)
-        # Grid the Treeview
-        races_tree.grid(row=0, column=0, sticky="nsew", in_=frame_races)
+        fetch_races()
+        # mycursor.execute("SELECT id, name FROM race WHERE status=1")
+        # races = mycursor.fetchall()
+        # # Adding rows to the Treeview
+        # for race in races:
+        #     races_tree.insert("", "end", values=race)
+        # # Grid the Treeview
+        # races_tree.grid(row=0, column=0, sticky="nsew", in_=frame_races)
 
         # For Checkpoints
-        mycursor.execute("SELECT id, name, start_cp, finish_cp, repeat_cp, event_id FROM checkpoint WHERE status=1")
-        checkpoints = mycursor.fetchall()
-        # Adding rows to the Treeview
-        for checkpoint in checkpoints:
-            checkpoints_tree.insert("", "end", values=checkpoint)
-        # Grid the Treeview
-        checkpoints_tree.grid(row=0, column=0, sticky="nsew", in_=frame_checkpoints)
+        fetch_checkpoints()
+        # mycursor.execute("SELECT id, name, start_cp, finish_cp, repeat_cp, event_id FROM checkpoint WHERE status=1")
+        # checkpoints = mycursor.fetchall()
+        # # Adding rows to the Treeview
+        # for checkpoint in checkpoints:
+        #     checkpoints_tree.insert("", "end", values=checkpoint)
+        # # Grid the Treeview
+        # checkpoints_tree.grid(row=0, column=0, sticky="nsew", in_=frame_checkpoints)
 
         # For CR Units
-        mycursor.execute("SELECT name, checkpoint_id, cr_in, cr_out, cr_in_out, checkpoint_id FROM event_cru")
-        crus = mycursor.fetchall()
-        # Adding rows to the Treeview
-        for cru in crus:
-            cru_tree.insert("", "end", values=cru)
-        # Grid the Treeview
-        cru_tree.grid(row=0, column=0, sticky="nsew", in_=frame_cru)
+        fetch_crus()
+        # mycursor.execute("SELECT name, description, cr_in, cr_out, cr_in_out, checkpoint_id, rfid_reader_chip_id, rfid_reader_id FROM event_cru")
+        # crus = mycursor.fetchall()
+        # # Adding rows to the Treeview
+        # for cru in crus:
+        #     crus_tree.insert("", "end", values=cru)
+        # # Grid the Treeview
+        # crus_tree.grid(row=0, column=0, sticky="nsew", in_=frame_crus)
 
         # For Participants
-        mycursor.execute("SELECT participant_first_name, participant_last_name, race_name, participant_bib, rfid_uid, rfid_label, event_id, race_id FROM race_participant ORDER BY CAST(participant_bib AS UNSIGNED)")
-        participants = mycursor.fetchall()
-        for participant in participants:
-            participants_tree.insert("", "end", values=participant)
-        # Grid the Treeview
-        participants_tree.grid(row=0, column=0, sticky="nsew", in_=frame_participants)
+        fetch_participants()
+        # mycursor.execute("""
+        #     SELECT participant_first_name, participant_last_name, race_name, participant_bib, 
+        #         rfid_uid, rfid_label, event_id, race_id 
+        #     FROM race_participant 
+        #     ORDER BY CAST(participant_bib AS UNSIGNED)""")
+        # participants = mycursor.fetchall()
+        # for participant in participants:
+        #     participants_tree.insert("", "end", values=participant)
+        # # Grid the Treeview
+        # participants_tree.grid(row=0, column=0, sticky="nsew", in_=frame_participants)
 
-def on_event_selected(event):
+        # For Registrations
+        fetch_registrations()
+
+
+def fetch_races():
     global mydb
-    if mydb:
-        # Hent valgte rader
-        selected_items = events_tree.selection()
-        
-        # Hent event_id fra de valgte radene
-        selected_event_ids = [events_tree.item(item)['values'][0] for item in selected_items]
+    selected_event_items = events_tree.selection()
 
-        # Hent rader fra race_participants basert på valgte event_id(s)
-        try:
+    params = []
+
+    # Bygg SQL-spørringen basert på de valgte verdiene
+    races_query = "SELECT id, name FROM race WHERE 1=1"  # Basis for spørringen
+
+    # Hvis noen events er valgt, legg til event_id i spørringen
+    if selected_event_items:
+        selected_event_ids = [events_tree.item(item)['values'][0] for item in selected_event_items]
+        print("selected_event_ids", selected_event_ids)
+        races_query += " AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
+        params.extend(selected_event_ids)
+
+     # Kjør SQL-spørringen, hent data, og fyll Treeview
+    try:
+        if mydb:
             mycursor = mydb.cursor()
-
-            # Hent rader fra race basert på valgte event_id(s)
-            query_races = "SELECT id, name FROM race WHERE status=1 AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
-            mycursor.execute(query_races, tuple(selected_event_ids))
+            mycursor.execute(races_query, tuple(params))
             races = mycursor.fetchall()
-            # Tøm Races-tabellen
+            # Tøm races-tabellen
             for race in races_tree.get_children():
                 races_tree.delete(race)
-            # Fyll Races-tabellen med de filtrerte resultatene
+            # Fyll races-tabellen med de filtrerte resultatene
             for race in races:
                 races_tree.insert("", "end", values=race)
+            
+            races_tree.grid(row=0, column=0, sticky="nsew", in_=frame_races)
+        else:
+            messagebox.showerror("Error", "Unable to connect to database (MariaDB).")
+    except mysql.connector.Error as err:
+        if err.msg == "MySQL Connection not available":
+            mydb = connect_to_mariadb() # Prøv å koble til på nytt
+            if mydb:
+                fetch_races()
+            else:
+                messagebox.showerror("Database Error", "Failed to reconnect to the database.")
+        else:
+            messagebox.showerror("Database Error", str(err))
 
-            # Hent rader fra checkpoint basert på valgte event_id(s)
-            query_checkpoints = "SELECT id, name, start_cp, finish_cp, repeat_cp, event_id FROM checkpoint WHERE status=1 AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
-            mycursor.execute(query_checkpoints, tuple(selected_event_ids))
+def fetch_checkpoints():
+    global mydb
+    selected_event_items = events_tree.selection()
+
+    params = []
+
+    # Bygg SQL-spørringen basert på de valgte verdiene
+    checkpoints_query = "SELECT id, name, start_cp, finish_cp, repeat_cp, event_id FROM checkpoint WHERE status=1"  # Basis for spørringen
+
+    # Hvis noen events er valgt, legg til event_id i spørringen
+    if selected_event_items:
+        selected_event_ids = [events_tree.item(item)['values'][0] for item in selected_event_items]
+        print("selected_event_ids", selected_event_ids)
+        checkpoints_query += " AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
+        params.extend(selected_event_ids)
+
+    # Kjør SQL-spørringen, hent data, og fyll Treeview
+    try:
+        if mydb:
+            mycursor = mydb.cursor()
+            mycursor.execute(checkpoints_query, tuple(params))
             checkpoints = mycursor.fetchall()
-            # Tøm Checkpoints-tabellen
+            # Tøm checkpoints-tabellen
             for checkpoint in checkpoints_tree.get_children():
                 checkpoints_tree.delete(checkpoint)
-            # Fyll Checkpoints-tabellen med de filtrerte resultatene
+            # Fyll checkpoints-tabellen med de filtrerte resultatene
             for checkpoint in checkpoints:
                 checkpoints_tree.insert("", "end", values=checkpoint)
-
-            # Hent rader fra event_cru basert på valgte event_id(s)
-            query_cru = "SELECT name, checkpoint_id, cr_in, cr_out, cr_in_out, checkpoint_id FROM event_cru WHERE event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
-            mycursor.execute(query_cru, tuple(selected_event_ids))
-            crus = mycursor.fetchall()
-            # Tøm CR Units-tabellen
-            for cru in cru_tree.get_children():
-                cru_tree.delete(cru)
-            # Fyll CR Units-tabellen med de filtrerte resultatene
-            for cru in crus:
-                cru_tree.insert("", "end", values=cru)
-
-            # Hent rader fra race_participants basert på valgte event_id(s)
-            query_participants = """
-            SELECT participant_first_name, participant_last_name, race_name, 
-                participant_bib, rfid_uid, rfid_label 
-            FROM race_participant 
-            WHERE event_id IN (%s)
-            ORDER BY CAST(participant_bib AS UNSIGNED)
-            """ % ', '.join(['%s'] * len(selected_event_ids))
-            mycursor.execute(query_participants, tuple(selected_event_ids))
-            participants = mycursor.fetchall()
-            # Tøm Participants-tabellen
-            for participant in participants_tree.get_children():
-                participants_tree.delete(participant)
-            # Fyll Participants-tabellen med de filtrerte resultatene
-            for participant in participants:
-                participants_tree.insert("", "end", values=(participant[0], participant[1], participant[2], participant[3], participant[4], participant[5]))
-
-        except mysql.connector.Error as err:
-            if err.msg == "MySQL Connection not available":
-                mydb = connect_to_mariadb() # Prøv å koble til på nytt
-                if mydb:
-                    on_event_selected(event)  # Prøv funksjonen på nytt
-                else:
-                    messagebox.showerror("Database Error", "Failed to reconnect to the database.")
+            
+            checkpoints_tree.grid(row=0, column=0, sticky="nsew", in_=frame_checkpoints)
+        else:
+            messagebox.showerror("Error", "Unable to connect to database (MariaDB).")
+    except mysql.connector.Error as err:
+        if err.msg == "MySQL Connection not available":
+            mydb = connect_to_mariadb() # Prøv å koble til på nytt
+            if mydb:
+                fetch_checkpoints()
             else:
-                messagebox.showerror("Database Error", str(err))
-    else:
-        messagebox.showerror("Feil", "Klarte ikke å koble til MariaDB.")
+                messagebox.showerror("Database Error", "Failed to reconnect to the database.")
+        else:
+            messagebox.showerror("Database Error", str(err))
 
-def on_race_selected(race):
+def fetch_crus():
     global mydb
-    if mydb:
-        # Hent valgte rader
-        selected_items = races_tree.selection()
-        
-        # Hent event_id fra de valgte radene
-        selected_race_ids = [races_tree.item(item)['values'][0] for item in selected_items]
-        print("selected_race_ids", selected_race_ids)
+    selected_event_items = events_tree.selection()
 
-        # Hent rader fra participant basert på valgte event_id(s)
-        try:
+    params = []
+
+    # Bygg SQL-spørringen basert på de valgte verdiene
+    crus_query = "SELECT name, description, cr_in, cr_out, cr_in_out, checkpoint_id, rfid_reader_chip_id, rfid_reader_id FROM event_cru WHERE 1=1"  # Basis for spørringen
+
+    # Hvis noen events er valgt, legg til event_id i spørringen
+    if selected_event_items:
+        selected_event_ids = [events_tree.item(item)['values'][0] for item in selected_event_items]
+        print("selected_event_ids", selected_event_ids)
+        crus_query += " AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
+        params.extend(selected_event_ids)
+
+    # Kjør SQL-spørringen, hent data, og fyll Treeview
+    try:
+        if mydb:
             mycursor = mydb.cursor()
-            query = ("SELECT participant_first_name, participant_last_name, race_name, participant_bib, rfid_uid, rfid_label, race_id "
-                "FROM race_participant WHERE race_id IN (%s) "
-                "ORDER BY CAST(participant_bib AS UNSIGNED)") % ', '.join(['%s'] * len(selected_race_ids))
-            mycursor.execute(query, tuple(selected_race_ids))
-            participants = mycursor.fetchall()
+            mycursor.execute(crus_query, tuple(params))
+            crus = mycursor.fetchall()
+            # Tøm crus-tabellen
+            for cru in crus_tree.get_children():
+                crus_tree.delete(cru)
+            # Fyll crus-tabellen med de filtrerte resultatene
+            for cru in crus:
+                crus_tree.insert("", "end", values=cru)
+            
+            crus_tree.grid(row=0, column=0, sticky="nsew", in_=frame_crus)
+        else:
+            messagebox.showerror("Error", "Unable to connect to database (MariaDB).")
+    except mysql.connector.Error as err:
+        if err.msg == "MySQL Connection not available":
+            mydb = connect_to_mariadb() # Prøv å koble til på nytt
+            if mydb:
+                fetch_crus()
+            else:
+                messagebox.showerror("Database Error", "Failed to reconnect to the database.")
+        else:
+            messagebox.showerror("Database Error", str(err))
+    
+def fetch_participants():
+    global mydb
+    selected_event_items = events_tree.selection()
+    selected_race_items = races_tree.selection()
 
-            # Tøm Participants-tabellen
+    params = []
+
+    # Bygg SQL-spørringen basert på de valgte verdiene
+    participants_query = "SELECT participant_first_name, participant_last_name, race_name, participant_bib, rfid_uid, rfid_label FROM race_participant WHERE 1=1"
+    # Hvis noen events er valgt, legg til event_id i spørringen
+    if selected_event_items:
+        selected_event_ids = [events_tree.item(item)['values'][0] for item in selected_event_items]
+        print("selected_event_ids", selected_event_ids)
+        participants_query += " AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
+        params.extend(selected_event_ids)
+
+    # Gjør tilsvarende for races
+    if selected_race_items:
+        selected_race_ids = [races_tree.item(item)['values'][0] for item in selected_race_items]
+        participants_query += " AND race_id IN (%s)" % ', '.join(['%s'] * len(selected_race_ids))
+        params.extend(selected_race_ids)
+
+    # Kjør SQL-spørringen, hent data, og fyll Treeview
+    try:
+        if mydb:
+            mycursor = mydb.cursor()
+            mycursor.execute(participants_query, tuple(params))
+            participants = mycursor.fetchall()
+            # Tøm participants-tabellen
             for participant in participants_tree.get_children():
                 participants_tree.delete(participant)
-
-            # Fyll Participants-tabellen med de filtrerte resultatene
+            # Fyll participants-tabellen med de filtrerte resultatene
             for participant in participants:
                 participants_tree.insert("", "end", values=participant)
-        except mysql.connector.Error as err:
-            if err.msg == "MySQL Connection not available":
-                mydb = connect_to_mariadb() # Prøv å koble til på nytt
-                if mydb:
-                    on_race_selected(race)  # Prøv funksjonen på nytt
-                else:
-                    messagebox.showerror("Database Error", "Failed to reconnect to the database.")
+            
+            participants_tree.grid(row=0, column=0, sticky="nsew", in_=frame_participants)
+        else:
+            messagebox.showerror("Error", "Unable to connect to database (MariaDB).")
+    except mysql.connector.Error as err:
+        if err.msg == "MySQL Connection not available":
+            mydb = connect_to_mariadb() # Prøv å koble til på nytt
+            if mydb:
+                fetch_participants()
             else:
-                messagebox.showerror("Database Error", str(err))
-    else:
-        messagebox.showerror("Feil", "Klarte ikke å koble til MariaDB.")
+                messagebox.showerror("Database Error", "Failed to reconnect to the database.")
+        else:
+            messagebox.showerror("Database Error", str(err))
 
+# Function to fetch registrations from database
+def fetch_registrations():
+    global mydb
+    selected_event_items = events_tree.selection()
+    selected_race_items = races_tree.selection()
+    selected_checkpoint_items = checkpoints_tree.selection()
+    selected_crus_items = crus_tree.selection()
+    selected_participant_items = participants_tree.selection()
+
+    params = []
+
+    # Bygg SQL-spørringen basert på de valgte verdiene 
+    registrations_query = """
+        SELECT id, rfid_reader_chip_id, rfid_tag_uid, adjusted_reader_time, 
+            checkpoint_id, cp_name, checkpoint_name, event_id, race_id, label, first_name, last_name 
+        FROM registration_view 
+        WHERE 1=1
+        """  # Basis for spørringen
+
+    # Hvis noen events er valgt, legg til event_id i spørringen
+    if selected_event_items:
+        selected_event_ids = [events_tree.item(item)['values'][0] for item in selected_event_items]
+        print("selected_event_ids", selected_event_ids)
+        registrations_query += " AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
+        params.extend(selected_event_ids)
+
+    # Gjør tilsvarende for races, checkpoints, og CR units...
+    if selected_race_items:
+        selected_race_ids = [races_tree.item(item)['values'][0] for item in selected_race_items]
+        registrations_query += " AND race_id IN (%s)" % ', '.join(['%s'] * len(selected_race_ids))
+        params.extend(selected_race_ids)
+
+    if selected_checkpoint_items:
+        selected_checkpoint_ids = [checkpoints_tree.item(item)['values'][0] for item in selected_checkpoint_items]
+        registrations_query += " AND checkpoint_id IN (%s)" % ', '.join(['%s'] * len(selected_checkpoint_ids))
+        params.extend(selected_checkpoint_ids)
+
+    if selected_crus_items:
+        selected_crus_ids = [crus_tree.item(item)['values'][6] for item in selected_crus_items]
+        registrations_query += " AND rfid_reader_chip_id IN (%s)" % ', '.join(['%s'] * len(selected_crus_ids))
+        params.extend(selected_crus_ids)
+
+    if selected_participant_items:
+        selected_participant_bibs = [participants_tree.item(item)['values'][3] for item in selected_participant_items]
+        registrations_query += " AND bib IN (%s)" % ', '.join(['%s'] * len(selected_participant_bibs))
+        params.extend(selected_participant_bibs)
+
+    # Kjør SQL-spørringen, hent data, og fyll Treeview
+    try:
+        if mydb:
+            mycursor = mydb.cursor()
+            mycursor.execute(registrations_query, tuple(params))
+            registrations = mycursor.fetchall()
+            # Tøm registrations-tabellen
+            for registration in registrations_tree.get_children():
+                registrations_tree.delete(registration)
+            # Fyll registrations-tabellen med de filtrerte resultatene
+            for registration in registrations:
+                registrations_tree.insert("", "end", values=registration)
+            
+            registrations_tree.grid(row=0, column=0, sticky="nsew", in_=frame_registrations)
+        else:
+            messagebox.showerror("Error", "Unable to connect to database (MariaDB).")
+    except mysql.connector.Error as err:
+        if err.msg == "MySQL Connection not available":
+            mydb = connect_to_mariadb() # Prøv å koble til på nytt
+            if mydb:
+                fetch_registrations()
+            else:
+                messagebox.showerror("Database Error", "Failed to reconnect to the database.")
+        else:
+            messagebox.showerror("Database Error", str(err))
+
+
+def on_event_selected(event):
+    # global mydb
+    # if mydb:
+    #     # Hent valgte rader
+    #     selected_items = events_tree.selection()
+        
+    #     # Hent event_id fra de valgte radene
+    #     selected_event_ids = [events_tree.item(item)['values'][0] for item in selected_items]
+
+    #     # Hent rader fra race_participants basert på valgte event_id(s)
+    #     try:
+    #         mycursor = mydb.cursor()
+
+            # Hent rader fra race basert på valgte event_id(s)
+            fetch_races()
+            # query_races = "SELECT id, name FROM race WHERE status=1 AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
+            # mycursor.execute(query_races, tuple(selected_event_ids))
+            # races = mycursor.fetchall()
+            # # Tøm Races-tabellen
+            # for race in races_tree.get_children():
+            #     races_tree.delete(race)
+            # # Fyll Races-tabellen med de filtrerte resultatene
+            # for race in races:
+            #     races_tree.insert("", "end", values=race)
+
+            # Hent rader fra checkpoint basert på valgte event_id(s)
+            fetch_checkpoints()
+            # query_checkpoints = "SELECT id, name, start_cp, finish_cp, repeat_cp, event_id FROM checkpoint WHERE status=1 AND event_id IN (%s)" % ', '.join(['%s'] * len(selected_event_ids))
+            # mycursor.execute(query_checkpoints, tuple(selected_event_ids))
+            # checkpoints = mycursor.fetchall()
+            # # Tøm Checkpoints-tabellen
+            # for checkpoint in checkpoints_tree.get_children():
+            #     checkpoints_tree.delete(checkpoint)
+            # # Fyll Checkpoints-tabellen med de filtrerte resultatene
+            # for checkpoint in checkpoints:
+            #     checkpoints_tree.insert("", "end", values=checkpoint)
+
+            # Hent rader fra event_cru basert på valgte event_id(s)
+            fetch_crus()
+            # query_cru = """
+            # SELECT name, description, cr_in, cr_out, cr_in_out, checkpoint_id, rfid_reader_chip_id, rfid_reader_id 
+            # FROM event_cru 
+            # WHERE event_id IN (%s)
+            # """ % ', '.join(['%s'] * len(selected_event_ids))
+            # mycursor.execute(query_cru, tuple(selected_event_ids))
+            # crus = mycursor.fetchall()
+            # # Tøm CR Units-tabellen
+            # for cru in crus_tree.get_children():
+            #     crus_tree.delete(cru)
+            # # Fyll CR Units-tabellen med de filtrerte resultatene
+            # for cru in crus:
+            #     crus_tree.insert("", "end", values=cru)
+
+            # Hent rader fra race_participants basert på valgte event_id(s)
+            fetch_participants()
+            # query_participants = """
+            # SELECT participant_first_name, participant_last_name, race_name, 
+            #     participant_bib, rfid_uid, rfid_label 
+            # FROM race_participant 
+            # WHERE event_id IN (%s)
+            # ORDER BY CAST(participant_bib AS UNSIGNED)
+            # """ % ', '.join(['%s'] * len(selected_event_ids))
+            # mycursor.execute(query_participants, tuple(selected_event_ids))
+            # participants = mycursor.fetchall()
+            # # Tøm Participants-tabellen
+            # for participant in participants_tree.get_children():
+            #     participants_tree.delete(participant)
+            # # Fyll Participants-tabellen med de filtrerte resultatene
+            # for participant in participants:
+            #     participants_tree.insert("", "end", values=(participant[0], participant[1], participant[2], participant[3], participant[4], participant[5]))
+
+            # Hent rader fra registration_view basert på valgte event_id(s)
+            fetch_registrations()
+
+    #     except mysql.connector.Error as err:
+    #         if err.msg == "MySQL Connection not available":
+    #             mydb = connect_to_mariadb() # Prøv å koble til på nytt
+    #             if mydb:
+    #                 on_event_selected(event)  # Prøv funksjonen på nytt
+    #             else:
+    #                 messagebox.showerror("Database Error", "Failed to reconnect to the database.")
+    #         else:
+    #             messagebox.showerror("Database Error", str(err))
+    # else:
+    #     messagebox.showerror("Error", "Unable to connect to database (MariaDB).")
+
+def on_race_selected(race):
+    # global mydb
+    # if mydb:
+    #     # Hent valgte rader
+    #     selected_items = races_tree.selection()
+        
+    #     # Hent event_id fra de valgte radene
+    #     selected_race_ids = [races_tree.item(item)['values'][0] for item in selected_items]
+    #     print("selected_race_ids", selected_race_ids)
+
+        # Hent rader fra participant basert på valgte event_id(s)
+        fetch_participants()
+        fetch_registrations()
+        # try:
+        #     mycursor = mydb.cursor()
+        #     query = ("SELECT participant_first_name, participant_last_name, race_name, participant_bib, rfid_uid, rfid_label, race_id "
+        #         "FROM race_participant WHERE race_id IN (%s) "
+        #         "ORDER BY CAST(participant_bib AS UNSIGNED)") % ', '.join(['%s'] * len(selected_race_ids))
+        #     mycursor.execute(query, tuple(selected_race_ids))
+        #     participants = mycursor.fetchall()
+
+        #     # Tøm Participants-tabellen
+        #     for participant in participants_tree.get_children():
+        #         participants_tree.delete(participant)
+
+        #     # Fyll Participants-tabellen med de filtrerte resultatene
+        #     for participant in participants:
+        #         participants_tree.insert("", "end", values=participant)
+        # except mysql.connector.Error as err:
+        #     if err.msg == "MySQL Connection not available":
+        #         mydb = connect_to_mariadb() # Prøv å koble til på nytt
+        #         if mydb:
+        #             on_race_selected(race)  # Prøv funksjonen på nytt
+        #         else:
+        #             messagebox.showerror("Database Error", "Failed to reconnect to the database.")
+        #     else:
+        #         messagebox.showerror("Database Error", str(err))
+    # else:
+    #     messagebox.showerror("Error", "Unable to connect to database (MariaDB).")
+
+def on_checkpoint_selected(checkpoint):
+    fetch_registrations()
+
+def on_cru_selected(cru):
+    fetch_registrations()
+
+def on_participant_selected(participant):
+    fetch_registrations()
 
 # # Create the labels for the tables
 events_label = tk.Label(root, text="Events", font=("Arial", 12, "bold"))
 races_label = tk.Label(root, text="Races", font=("Arial", 12, "bold"))
 checkpoints_label = tk.Label(root, text="Checkpoints", font=("Arial", 12, "bold"))
-cru_label = tk.Label(root, text="CR Units", font=("Arial", 12, "bold"))
+crus_label = tk.Label(root, text="CR Units", font=("Arial", 12, "bold"))
 participants_label = tk.Label(root, text="Participants", font=("Arial", 12, "bold"))
+registrations_label = tk.Label(root, text="Registrations", font=("Arial", 12, "bold"))
 
 
 # Place the labels above their respective frames
 events_label.grid(row=0, column=1, pady=(10,0))
 races_label.grid(row=0, column=2, pady=(10,0))
 checkpoints_label.grid(row=0, column=3, pady=(10,0))
-cru_label.grid(row=0, column=4, pady=(10,0))
+crus_label.grid(row=0, column=4, pady=(10,0))
 participants_label.grid(row=2, column=1, pady=(10,0))
+registrations_label.grid(row=0, column=5, pady=(10,0))
 
 # Create the frames for the tables
 frame_events = tk.Frame(root)
@@ -412,21 +663,17 @@ frame_races = tk.Frame(root)
 frame_races.grid(row=1, column=2, padx=5, pady=5, sticky="nsew")
 frame_checkpoints = tk.Frame(root)
 frame_checkpoints.grid(row=1, column=3, padx=5, pady=5, sticky="nsew")
-frame_cru = tk.Frame(root)
-frame_cru.grid(row=1, column=4, padx=5, pady=5, sticky="nsew")
+frame_crus = tk.Frame(root)
+frame_crus.grid(row=1, column=4, padx=5, pady=5, sticky="nsew")
 frame_participants = tk.Frame(root)
-frame_participants.grid(row=3, column=1, padx=5, pady=5, sticky="nsew", columnspan=2)
+frame_participants.grid(row=3, column=1, padx=5, pady=5, sticky="nsew", columnspan=4)
+frame_registrations = tk.Frame(root)
+frame_registrations.grid(row=1, column=5, padx=5, pady=5, sticky="nsew", rowspan=3)
 
-# Create buttons for the main menu
-upload_button = ttk.Button(root, text="Last opp data for nytt løp", command=upload_new_event_data)
-exit_button = ttk.Button(root, text="Avslutt", command=exit_app)
-# Place the buttons on the window
-upload_button.grid(row=4, column=1, padx=10, pady=10)
-exit_button.grid(row=4, column=3, padx=10, pady=10)
 
-# Opprett Treeview-widget for hver tabell
+## Opprett Treeview-widget for hver tabell
 # Opprett Treeview-widget for events-tabell
-events_tree = ttk.Treeview(root)
+events_tree = ttk.Treeview(root, height=8)
 events_tree["columns"] = ("id", "long_name", "year", "edition")
 events_tree["displaycolumns"] = ("long_name", "year")
 events_tree["show"] = "headings"  # Removes the first empty column
@@ -437,7 +684,7 @@ events_tree.heading("year", text="Year", anchor="center")
 events_tree.bind("<<TreeviewSelect>>", on_event_selected)   # Bind hendelsen for radvalg i Events-tabellen
 
 # Opprett Treeview-widget for races-tabell
-races_tree = ttk.Treeview(root)
+races_tree = ttk.Treeview(root, height=8)
 races_tree["columns"] = ("id", "name")
 races_tree["displaycolumns"] = ("name")
 races_tree["show"] = "headings"  # Removes the first empty column
@@ -446,11 +693,11 @@ races_tree.heading("name", text="Race Name", anchor="w")
 races_tree.bind("<<TreeviewSelect>>", on_race_selected)   # Bind hendelsen for radvalg i Events-tabellen
 
 # Opprett Treeview-widget for checkpoints-tabell
-checkpoints_tree = ttk.Treeview(root)
+checkpoints_tree = ttk.Treeview(root, height=8)
 checkpoints_tree["columns"] = ("id", "name", "start_cp", "finish_cp", "repeat_cp", "event_id")
 checkpoints_tree["displaycolumns"] = ("name", "start_cp", "finish_cp", "repeat_cp")
 checkpoints_tree["show"] = "headings"  # Removes the first empty column 
-checkpoints_tree.column("name", width=100, anchor="w")
+checkpoints_tree.column("name", width=150, anchor="w")
 checkpoints_tree.column("start_cp", width=10, anchor="center")
 checkpoints_tree.column("finish_cp", width=10, anchor="center")
 checkpoints_tree.column("repeat_cp", width=10, anchor="center")
@@ -458,23 +705,27 @@ checkpoints_tree.heading("name", text="CP", anchor="w")
 checkpoints_tree.heading("start_cp", text="S", anchor="center")
 checkpoints_tree.heading("finish_cp", text="F", anchor="center")
 checkpoints_tree.heading("repeat_cp", text="R", anchor="center")
+checkpoints_tree.bind("<<TreeviewSelect>>", on_checkpoint_selected)   # Bind hendelsen for radvalg i Events-tabellen
 
 # Opprett Treeview-widget for cru-tabell
-cru_tree = ttk.Treeview(root)
-cru_tree["columns"] = ("name", "checkpoint_id", "cr_in", "cr_out", "cr_in_out", "checkpoint_id")
-cru_tree["displaycolumns"] = ("name", "cr_in", "cr_out", "cr_in_out")
-cru_tree["show"] = "headings"  # Removes the first empty column
-cru_tree.column("name", width=100, anchor="w")
-cru_tree.column("cr_in", width=10, anchor="center")
-cru_tree.column("cr_out", width=10, anchor="center")
-cru_tree.column("cr_in_out", width=10, anchor="center")
-cru_tree.heading("name", text="CRU", anchor="w")
-cru_tree.heading("cr_in", text="I", anchor="center")
-cru_tree.heading("cr_out", text="O", anchor="center")
-cru_tree.heading("cr_in_out", text="IO", anchor="center")
+crus_tree = ttk.Treeview(root, height=8)
+crus_tree["columns"] = ("name", "description", "cr_in", "cr_out", "cr_in_out", "checkpoint_id", "rfid_reader_chip_id", "rfid_reader_id")
+crus_tree["displaycolumns"] = ("name", "description", "cr_in", "cr_out", "cr_in_out")
+crus_tree["show"] = "headings"  # Removes the first empty column
+crus_tree.column("name", width=100, anchor="w")
+crus_tree.column("description", width=150, anchor="w")
+crus_tree.column("cr_in", width=10, anchor="center")
+crus_tree.column("cr_out", width=10, anchor="center")
+crus_tree.column("cr_in_out", width=10, anchor="center")
+crus_tree.heading("name", text="CRU", anchor="w")
+crus_tree.heading("description", text="Description", anchor="w")
+crus_tree.heading("cr_in", text="I", anchor="center")
+crus_tree.heading("cr_out", text="O", anchor="center")
+crus_tree.heading("cr_in_out", text="IO", anchor="center")
+crus_tree.bind("<<TreeviewSelect>>", on_cru_selected)   # Bind hendelsen for radvalg i Events-tabellen
 
 #Opprett Treeview-widget for participant-tabell
-participants_tree = ttk.Treeview(root)
+participants_tree = ttk.Treeview(root, height=20)
 participants_tree["columns"] = ("participant_first_name", "participant_last_name", "race_name", "participant_bib", "rfid_uid", "rfid_label", "event_id", "race_id")
 participants_tree["displaycolumns"] = ("participant_first_name", "participant_last_name", "race_name", "participant_bib", "rfid_uid", "rfid_label")
 participants_tree["show"] = "headings"  # Removes the first empty column
@@ -490,8 +741,28 @@ participants_tree.heading("race_name", text="Race Name", anchor="w")
 participants_tree.heading("participant_bib", text="Bib", anchor="center")
 participants_tree.heading("rfid_uid", text="RFID UID", anchor="center")
 participants_tree.heading("rfid_label", text="Label", anchor="center")
+participants_tree.bind("<<TreeviewSelect>>", on_participant_selected)   # Bind hendelsen for radvalg i Events-tabellen
 
-# registrations_tree = ttk.Treeview(root)
+# Opprett Treeview-widget for registrations-tabell
+registrations_tree = ttk.Treeview(root, height=35)
+registrations_tree["columns"] = ("id", "rfid_reader_chip_id", "rfid_tag_uid", "adjusted_reader_time", 
+    "checkpoint_id", "cp_name", "checkpoint_name", "event_id", "race_id", "label", "first_name", "last_name")
+registrations_tree["displaycolumns"] = ("id", "rfid_tag_uid", "adjusted_reader_time", "cp_name", "label", "first_name", "last_name")
+registrations_tree["show"] = "headings"  # Removes the first empty column
+registrations_tree.column("id", width=50, anchor="center")
+registrations_tree.column("rfid_tag_uid", width=100, anchor="center")
+registrations_tree.column("adjusted_reader_time", width=150, anchor="center")
+registrations_tree.column("cp_name", width=50, anchor="center")
+registrations_tree.column("label", width=50, anchor="center")
+registrations_tree.column("first_name", width=100, anchor="w")
+registrations_tree.column("last_name", width=100, anchor="w")
+registrations_tree.heading("id", text="ID", anchor="w")
+registrations_tree.heading("rfid_tag_uid", text="RFID UID", anchor="center")
+registrations_tree.heading("adjusted_reader_time", text="Time", anchor="center")
+registrations_tree.heading("cp_name", text="CP", anchor="center")
+registrations_tree.heading("label", text="Label", anchor="center")
+registrations_tree.heading("first_name", text="First Name", anchor="w")
+registrations_tree.heading("last_name", text="Last Name", anchor="w")
 
 # Opprett Scrollbar-widgets
 scrollbar_events_vertical = tk.Scrollbar(frame_events, orient="vertical")
@@ -500,10 +771,12 @@ scrollbar_races_vertical = tk.Scrollbar(frame_races, orient="vertical")
 scrollbar_races_horizontal = tk.Scrollbar(frame_races, orient="horizontal")
 scrollbar_checkpoints_vertical = tk.Scrollbar(frame_checkpoints, orient="vertical")
 scrollbar_checkpoints_horizontal = tk.Scrollbar(frame_checkpoints, orient="horizontal")
-scrollbar_cru_vertical = tk.Scrollbar(frame_cru, orient="vertical")
-scrollbar_cru_horizontal = tk.Scrollbar(frame_cru, orient="horizontal")
+scrollbar_crus_vertical = tk.Scrollbar(frame_crus, orient="vertical")
+scrollbar_crus_horizontal = tk.Scrollbar(frame_crus, orient="horizontal")
 scrollbar_participants_vertical = tk.Scrollbar(frame_participants, orient="vertical")
 scrollbar_participants_horizontal = tk.Scrollbar(frame_participants, orient="horizontal")
+scrollbar_registrations_vertical = tk.Scrollbar(frame_registrations, orient="vertical")
+scrollbar_registrations_horizontal = tk.Scrollbar(frame_registrations, orient="horizontal")
 
 
 # Knytt Scrollbar-widgets til Treeview-widgets
@@ -519,14 +792,18 @@ checkpoints_tree.config(yscrollcommand=scrollbar_checkpoints_vertical.set)
 scrollbar_checkpoints_vertical.config(command=checkpoints_tree.yview)
 checkpoints_tree.config(xscrollcommand=scrollbar_checkpoints_horizontal.set)
 scrollbar_checkpoints_horizontal.config(command=checkpoints_tree.xview)
-cru_tree.config(yscrollcommand=scrollbar_cru_vertical.set)
-scrollbar_cru_vertical.config(command=cru_tree.yview)
-cru_tree.config(xscrollcommand=scrollbar_cru_horizontal.set)
-scrollbar_cru_horizontal.config(command=cru_tree.xview)
+crus_tree.config(yscrollcommand=scrollbar_crus_vertical.set)
+scrollbar_crus_vertical.config(command=crus_tree.yview)
+crus_tree.config(xscrollcommand=scrollbar_crus_horizontal.set)
+scrollbar_crus_horizontal.config(command=crus_tree.xview)
 participants_tree.config(yscrollcommand=scrollbar_participants_vertical.set)
 scrollbar_participants_vertical.config(command=participants_tree.yview)
 participants_tree.config(xscrollcommand=scrollbar_participants_horizontal.set)
 scrollbar_participants_horizontal.config(command=participants_tree.xview)
+registrations_tree.config(yscrollcommand=scrollbar_registrations_vertical.set)
+scrollbar_registrations_vertical.config(command=registrations_tree.yview)
+registrations_tree.config(xscrollcommand=scrollbar_registrations_horizontal.set)
+scrollbar_registrations_horizontal.config(command=registrations_tree.xview)
 
 
 # For events_tree og dens scrollbars:
@@ -553,13 +830,13 @@ scrollbar_checkpoints_horizontal.grid(row=1, column=0, sticky="ew", in_=frame_ch
 frame_checkpoints.grid_rowconfigure(0, weight=1)
 frame_checkpoints.grid_columnconfigure(0, weight=1)
 
-# For cru_tree og dens scrollbars:
-cru_tree.grid(row=0, column=0, sticky="nsew", in_=frame_cru)
-scrollbar_cru_vertical.grid(row=0, column=1, sticky="ns", in_=frame_cru)
-scrollbar_cru_horizontal.grid(row=1, column=0, sticky="ew", in_=frame_cru)
-# Konfigurer grid-oppførselen for frame_cru:
-frame_cru.grid_rowconfigure(0, weight=1)
-frame_cru.grid_columnconfigure(0, weight=1)
+# For crus_tree og dens scrollbars:
+crus_tree.grid(row=0, column=0, sticky="nsew", in_=frame_crus)
+scrollbar_crus_vertical.grid(row=0, column=1, sticky="ns", in_=frame_crus)
+scrollbar_crus_horizontal.grid(row=1, column=0, sticky="ew", in_=frame_crus)
+# Konfigurer grid-oppførselen for frame_crus:
+frame_crus.grid_rowconfigure(0, weight=1)
+frame_crus.grid_columnconfigure(0, weight=1)
 
 # For participants_tree og dens scrollbars:
 participants_tree.grid(row=0, column=0, sticky="nsew", in_=frame_participants)
@@ -568,6 +845,23 @@ scrollbar_participants_horizontal.grid(row=1, column=0, sticky="ew", in_=frame_p
 # Konfigurer grid-oppførselen for frame_participants:
 frame_participants.grid_rowconfigure(0, weight=1)
 frame_participants.grid_columnconfigure(0, weight=1)
+
+# For registrations_tree og dens scrollbars:
+registrations_tree.grid(row=0, column=0, sticky="nsew", in_=frame_registrations)
+scrollbar_registrations_vertical.grid(row=0, column=1, sticky="ns", in_=frame_registrations)
+scrollbar_registrations_horizontal.grid(row=1, column=0, sticky="ew", in_=frame_registrations)
+# Konfigurer grid-oppførselen for frame_registrations:
+frame_registrations.grid_rowconfigure(0, weight=1)
+frame_registrations.grid_columnconfigure(0, weight=1)
+
+# Create buttons for the main menu
+upload_button = ttk.Button(root, text="Upload selected event", command=upload_selected_event_to_firebase)
+# get_registrations_button = ttk.Button(root, text="Download registrations", command=fetch_registrations_from_firebase)
+exit_button = ttk.Button(root, text="Exit", command=exit_app)
+# Place the buttons on the window
+upload_button.grid(row=4, column=1, padx=10, pady=10)
+# get_registrations_button.grid(row=4, column=2, padx=10, pady=10)
+exit_button.grid(row=4, column=4, padx=10, pady=10)
 
 
 mydb = connect_to_mariadb()
