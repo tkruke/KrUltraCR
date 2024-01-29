@@ -7,7 +7,7 @@ from tkinter import filedialog
 import mysql.connector
 from firebase import firebase
 import pyrebase
-from decouple import config
+from decouple import Config, config
 import datetime
 import pytz
 import csv
@@ -15,6 +15,8 @@ import openpyxl
 import os
 
 # Henter konfigurasjonsvariabler fra .env-filen
+print("Loading configuration variables...")
+# config = Config(".env")
 FIREBASE_API_KEY = config('FIREBASE_API_KEY')
 FIREBASE_AUTH_DOMAIN = config('FIREBASE_AUTH_DOMAIN')
 FIREBASE_DATABASE_URL = config('FIREBASE_DATABASE_URL')
@@ -79,55 +81,9 @@ def exit_app():
 
 
 ### Functions to upload and download data to/from Firebase
-def upload_runners_data_to_firebase(event_id):
-    try:
-        # mydb = connect_to_mariadb()   # erstattet av global variabel
-        if mydb:
-            # mycursor = mydb.cursor()
-            query = """
-            SELECT 
-                race.name AS race_name,
-                person.first_name AS participant_first_name,
-                person.last_name AS participant_last_name,
-                participant.bib AS participant_bib,
-                rfid_tag.uid AS rfid_uid
-            FROM race
-            JOIN participant ON race.id = participant.race_id
-            JOIN person ON participant.person_id = person.id
-            JOIN participant_tag ON participant.id = participant_tag.participant_id
-            JOIN rfid_tag ON participant_tag.rfid_tag_id = rfid_tag.id
-            WHERE race.event_id = %s AND race.status = 1
-            AND participant.status = 1 AND rfid_tag.status = 1;
-            """
-            mycursor.execute(query, (event_id,))
-            rows = mycursor.fetchall()
-            
-            # Create a list of dictionaries to hold the runner data
-            runner_data = {}
-            for row in rows:
-                rfid_uid = row[4]
-                runner_data[rfid_uid] = {
-                    'race_name': row[0],
-                    'participant_first_name': row[1],
-                    'participant_last_name': row[2],
-                    'participant_bib': row[3], 
-                }
-              
-            # Upload to Firebase
-            db.child("runners").set(runner_data, token=user_id_token)
-            
-            print("Successfully uploaded runners data to Firebase.")
-            
-    except Exception as e:
-        print(f"Failed to upload runners data to Firebase: {e}")
-        messagebox.showerror("Error", f"Failed to upload runners data to Firebase: {e}")
-        return None
 
-def upload_event_data_to_firebase(selected_event_id):
-    # Step 2.1: Fetch data from MariaDB
-    # mydb = connect_to_mariadb()   # erstattet av global variabel
-    if mydb:
-        # mycursor = mydb.cursor()
+def upload_rfid_readers_to_firebase(event_id):
+    try:
         sql_query = """
         SELECT rfid_reader.checkpoint_id, rfid_reader.chip_id, rfid_reader.description, 
         event.id, rfid_reader.name, rfid_reader.status, checkpoint.name, checkpoint.description, checkpoint.minimum_split,
@@ -135,18 +91,16 @@ def upload_event_data_to_firebase(selected_event_id):
         FROM event 
         JOIN checkpoint ON event.id = checkpoint.event_id 
         JOIN rfid_reader ON checkpoint.id = rfid_reader.checkpoint_id 
-        WHERE event.id = %s
+        WHERE event.id = %s AND checkpoint.status = 1 AND rfid_reader.status = 1;
         """
-        mycursor.execute(sql_query, (selected_event_id,))
-        rfid_readers_db = mycursor.fetchall()
-        
-        # Step 2.2: Delete existing data in Firebase
-        db.child("rfid_readers").remove(token=user_id_token)
-        
-        # Step 2.3: Upload new event data to Firebase
-        rfid_readers_list = []
-        for reader in rfid_readers_db:
-            reader_data = {
+        mycursor.execute(sql_query, (event_id,))
+        rows = mycursor.fetchall()
+
+        #  Upload new event data for rfid_readers to Firebase
+        reader_data = {}
+        i = 0
+        for reader in rows:
+            reader_data[i] = {
                 "checkpoint_id": reader[0],
                 "chip_id": reader[1],
                 "crus_description": reader[2],
@@ -160,40 +114,90 @@ def upload_event_data_to_firebase(selected_event_id):
                 "finish": reader[10],
                 "repeat": reader[11],
             }
-            rfid_readers_list.append(reader_data)
+            i += 1
+                    
+        # Delete existing data in Firebase
+        db.child("rfid_readers").remove(token=user_id_token)
+        print("Successfully deleted existing RFID readers data in Firebase.")
 
-        db.child("rfid_readers").set(rfid_readers_list, token=user_id_token)
+        db.child("rfid_readers").set(reader_data, token=user_id_token)
+        print("Successfully uploaded RFID readers data to Firebase.")
 
-        # Step 2.4: Upload runners data to Firebase
-        upload_runners_data_to_firebase(selected_event_id)
-        
-        print("Successfully uploaded event data to Firebase")
-        messagebox.showinfo("Success", "Event data uploaded to Firebase.")
-        # event_window.destroy()
+        return True
 
-        # # Spør brukeren om å slette eksisterende registreringer
-        # delete_registrations = messagebox.askyesno("Slett registreringer", "Ønsker du også å slette alle tidligere registreringer?")
-        # if delete_registrations:
-        #     try:
-        #         db.child("registrations").remove(token=user_id_token)  # Slett alle data under "registrations"
-        #         messagebox.showinfo("Suksess", "Alle registreringer ble fjernet.")
-        #     except Exception as e:
-        #         messagebox.showerror("Feil", f"Klarte ikke å slette registreringer: {e}")
-    else:
-        messagebox.showerror("Error", "Unable to connect to database (MariaDB).")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        messagebox.showerror("Error", f"An error occurred: {e}")
+        return False
 
+def upload_runners_to_firebase(event_id):
+    try:
+        sql_query = """
+        SELECT 
+            race.name AS race_name,
+            person.first_name AS participant_first_name,
+            person.last_name AS participant_last_name,
+            participant.bib AS participant_bib,
+            rfid_tag.uid AS rfid_uid
+        FROM race
+        JOIN participant ON race.id = participant.race_id
+        JOIN person ON participant.person_id = person.id
+        JOIN participant_tag ON participant.id = participant_tag.participant_id
+        JOIN rfid_tag ON participant_tag.rfid_tag_id = rfid_tag.id
+        WHERE race.event_id = %s AND race.status = 1 AND participant.status = 1 AND rfid_tag.status = 1;
+        """
+        mycursor.execute(sql_query, (event_id,))
+        rows = mycursor.fetchall()
+
+        # Create a list of dictionaries to hold the runner data
+        runner_data = {}
+        for runner in rows:
+            rfid_uid = runner[4]
+            runner_data[rfid_uid] = {
+                'race_name': runner[0],
+                'participant_first_name': runner[1],
+                'participant_last_name': runner[2],
+                'participant_bib': runner[3], 
+            }
+
+        # Delete existing data in Firebase
+        db.child("runners").remove(token=user_id_token)
+        print("Successfully deleted existing runners data in Firebase.")
+
+        # Upload new event data for runners to Firebase
+        db.child("runners").set(runner_data, token=user_id_token)
+        print("Successfully uploaded runners data to Firebase.")
+
+        return True
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        messagebox.showerror("Error", f"An error occurred: {e}")
+        return False
+      
 def upload_selected_event_to_firebase():
     selected_items = events_tree.selection()
 
     if len(selected_items) != 1:
         messagebox.showwarning("Valg av event", "Vennligst velg ett event for opplasting.")
-        return
+        return False
 
     selected_event_id = events_tree.item(selected_items[0])['values'][0]
 
     answer = messagebox.askyesno("Bekreftelse", "Er du sikker? Eksisterende data fjernes!")
     if answer:
-        upload_event_data_to_firebase(selected_event_id)  # Kall eksisterende funksjon med valgt event ID
+        if mydb:
+            if (
+                upload_rfid_readers_to_firebase(selected_event_id) and
+                upload_runners_to_firebase(selected_event_id)
+            ):
+                print("Successfully uploaded event data to Firebase")
+                messagebox.showinfo("Success", "Event data uploaded to Firebase.")
+            else:
+                print("An error occurred while uploading event data to Firebase.")
+                messagebox.showerror("Error", "An error occurred while uploading event data to Firebase.")
+        else:
+            messagebox.showerror("Error", "Unable to connect to KrUltraCR (MariaDB) database.")
 
 def fetch_and_store_from_firebase_to_sql():
     try:
@@ -724,6 +728,8 @@ def generate_results():
             messagebox.showerror("Error", "Please select a report.")
         elif selected_report == "1":
             generate_itra_report(selected_race)
+        elif selected_report == "2":
+            generate_KUTC_report(selected_event)
         # Legg til flere 'elif' for andre rapporter hvis nødvendig
         else:
             print("Invalid selected report")
@@ -792,8 +798,6 @@ def generate_itra_report(selected_race):
         WHERE race_id = {selected_race} AND finish_cp = 1
         ) ranked
     """
-
-    print("sql_query:", sql_query)
 
     mycursor.execute(sql_query)
 
@@ -865,6 +869,77 @@ def generate_itra_report(selected_race):
 
     print(f"Rapporten er lagret som '{file_path}'.")
     messagebox.showinfo("Success", f"Rapporten er lagret som '{file_path}'.")
+
+def generate_KUTC_report(selected_event):
+    print("selected_event:", selected_event)
+    global mycursor
+    sql_query = f"""
+    SELECT
+        bib,
+        first_name,
+        last_name,
+        club,
+        alpha3_code as country,
+        left(long_gender, 1) AS gender,
+        YEAR(date_of_birth) AS year_of_birth,
+        COUNT(*) AS loops,
+        MAX(SEC_TO_TIME(TIMESTAMPDIFF(SECOND, start_time, adjusted_reader_time))) AS time,
+        event_name,
+        race_name,
+        race_loops
+    FROM registration_view
+    WHERE 
+        event_id = {selected_event} AND 
+        finish_cp = 1 AND
+        status = 1
+    GROUP BY participant_id
+    ORDER BY loops DESC, time ASC
+    """
+
+    mycursor.execute(sql_query)
+    results = mycursor.fetchall()
+
+    print("results:", results)
+
+    ranked_results = []
+    ranking = 1
+
+    for row in results:
+        bib, first_name, last_name, club, country, gender, year_of_birth, loops, time, event_name, race_name, race_loops = row
+        ranked_results.append((event_name, ranking, first_name + " " + last_name, loops, time, int(bib), club, country, race_name))
+        ranking += 1
+
+    print("ranked_results:", ranked_results)
+
+    # Opprett en rotvindu for Tkinter
+    root = tk.Tk()
+    root.withdraw()  # Skjul rotvinduet
+
+    # Spør brukeren om å velge en filplassering og filnavn
+    file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel Files", "*.xlsx")])
+
+    # Avslutt programmet hvis brukeren avbryter dialogvinduet
+    if not file_path:
+        print("Operasjonen ble avbrutt av brukeren.")
+    else:
+        # Opprett en ny Excel-arbeidsbok og få tak i det aktive arket
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+
+        # Legg til kolonneoverskrifter
+        headers = ["Event", "Ranking", "Name", "Loops", "Time", "Bib number", "Club", "Nationality", "Race"]
+        sheet.append(headers)
+
+        # Legg til data i arket
+        for runner_data in ranked_results:
+            sheet.append(runner_data)
+
+        # Lagre Excel-arbeidsboken med det valgte filnavnet
+        workbook.save(file_path)
+
+    print(f"Rapporten er lagret som '{file_path}'.")
+    messagebox.showinfo("Success", f"Rapporten er lagret som '{file_path}'.")
+
 
 
 ### Functions to filter data from the database based on user selections
