@@ -1,0 +1,10 @@
+Linear
+AMS1117-5 Linear Module - Kan ta helt ned til 6V inn. Gir 5V ut. Lavt strømkonsum, egnet til batteridrevne prosjekt. 
+L4931CZ33 Regulator - 3.3V linear regulator (finnes også i 5V). "Extremely low voltage drop (0,4V). Egnet for batteridrevne prosjekt. Liten, tre pins. Trenger to kapasitatorer. 
+
+Switched
+Buck (skalerer ned)
+MINI-360. 95% efficiency. Input 4,75-23, out 1-17V
+
+Buck/Boost
+S9V11F5. Input 2-16V, output 5V. Svært liten og lite plasskrevende.Tre pins. NB: Kan bli veldig varm!
